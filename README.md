@@ -63,6 +63,12 @@ The integration creates these entities:
 - Control climate based on occupancy and temperature
 - Manage energy usage based on historical patterns
 
+## Predicting ahead (prediction horizon)
+
+By default the model predicts the target's *current* state. Set a **prediction horizon** (seconds) in the additional settings or options to predict what the target will do within the next N seconds instead. Example: target = hallway motion sensor, features = door sensors and other rooms' motion sensors, horizon = 10. Then trigger a light automation when the prediction sensor says `on` with a probability above ~0.7, so the light is already on before the hallway sensor fires.
+
+Changing the horizon resets the collected data, and the initial recorder import is skipped when a horizon is set.
+
 ## Requirements
 
 - Home Assistant 2025.2.4 or later
