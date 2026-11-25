@@ -1102,3 +1102,11 @@ class TestModelMissingAndWeirdData:
         assert normalized is not None
         # Shape should be preserved
         assert normalized.shape == data.shape
+
+
+def test_factorize_mixed_str_and_float() -> None:
+    """Mixed str/float (NaN) columns must not raise on sorting."""
+    data = np.array([["a", 1.0], [float("nan"), 2.0], ["b", 3.0]], dtype=object)
+    encoded, factors = Model(MockLogger())._factorize(data)  # noqa: SLF001
+    assert 0 in factors
+    assert encoded.shape == data.shape

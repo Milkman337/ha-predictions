@@ -1,5 +1,6 @@
 """ML Model management."""
 
+import contextlib
 from logging import Logger
 from types import NoneType
 from typing import Any
@@ -54,7 +55,7 @@ class Model:
         for col_idx in range(data.shape[1]):
             # Apply factorization if this column was factorized during training
             if col_idx in self.factors:
-                value = data[0, col_idx]
+                value = str(data[0, col_idx])
                 categories = self.factors[col_idx]
 
                 # Find the index of the value in categories using numpy
@@ -250,13 +251,19 @@ class Model:
         for col_idx in range(data.shape[1]):
             column_data = data[:, col_idx]
 
+            # Object columns holding only numbers (feature columns) stay numeric
+            if column_data.dtype == object and col_idx != data.shape[1] - 1:
+                with contextlib.suppress(ValueError, TypeError):
+                    column_data = column_data.astype(float)
+
             # Check if column contains non-numeric data
             if column_data.dtype == object or not np.issubdtype(
                 column_data.dtype, np.number
             ):
                 # Use numpy.unique to get unique values and their indices
+                # Stringify first: mixed str/float (e.g. NaN) cannot be sorted
                 unique_values, inverse_indices = np.unique(
-                    column_data, return_inverse=True
+                    column_data.astype(str), return_inverse=True
                 )
                 # Store the unique values for later decoding (keyed by column index)
                 factors[col_idx] = unique_values
