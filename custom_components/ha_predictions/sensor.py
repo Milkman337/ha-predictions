@@ -110,7 +110,7 @@ class DatasetSensor(HAPredictionEntity, SensorEntity):
 
     def notify(self, msg: str) -> None:
         """Handle notifications from the coordinator."""
-        if msg is MSG_DATASET_CHANGED:
+        if msg == MSG_DATASET_CHANGED:
             self.schedule_update_ha_state()
 
 
@@ -161,7 +161,7 @@ class CurrentPredictionSensor(HAPredictionEntity, SensorEntity):
     def notify(self, msg: str) -> None:
         """Handle notifications from the coordinator."""
         if (
-            msg is MSG_PREDICTION_MADE
+            msg == MSG_PREDICTION_MADE
             and self.coordinator.current_prediction is not None
         ):
             self.prediction_label = self.coordinator.current_prediction[0]
@@ -203,7 +203,7 @@ class PredictionPerformanceSensor(HAPredictionEntity, SensorEntity):
 
     def notify(self, msg: str) -> None:
         """Handle notifications from the coordinator."""
-        if msg is MSG_TRAINING_DONE:
+        if msg == MSG_TRAINING_DONE:
             self.schedule_update_ha_state()
 
     @property
