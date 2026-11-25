@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import defaultdict
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -85,7 +86,12 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
                 self._initialize_dataframe()
 
     async def _async_update_data(self) -> Any:
-        """Update data via library."""
+        """Retrain periodically once enough new data points have been collected."""
+        new_rows = self.dataset_size - self.trained_dataset_size
+        threshold = max(MIN_DATASET_SIZE // 2, self.trained_dataset_size // 10)
+        if self.training_ready and (self.last_trained is None or new_rows >= threshold):
+            self.logger.info("Retraining automatically (%d new data points)", new_rows)
+            await self.train()
 
     def register(self, entity: HAPredictionEntity) -> None:
         """Register an entity to be notified on changes."""
