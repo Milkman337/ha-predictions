@@ -15,10 +15,12 @@
                         "name": "Additional Settings",
                         "description": "Configure additional settings for HA Predictions.",
                         "data": {
-                            "CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER": "Import initial training data from Home Assistant Recorder"
+                            "CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER": "Import initial training data from Home Assistant Recorder",
+                            "CONF_PREDICTION_HORIZON": "Prediction horizon (seconds)"
                         },
                         "data_description": {
-                            "CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER": "When enabled, HA Predictions will import historical data from the Home Assistant Recorder to initialize the training dataset. This can help improve prediction accuracy by leveraging existing data. It also gives you a head start on training without having to wait for new data to be collected."
+                            "CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER": "When enabled, HA Predictions will import historical data from the Home Assistant Recorder to initialize the training dataset. This can help improve prediction accuracy by leveraging existing data. It also gives you a head start on training without having to wait for new data to be collected. Not used when a prediction horizon is set.",
+                            "CONF_PREDICTION_HORIZON": "0 predicts the current state of the target. A value N > 0 predicts what the target will do within the next N seconds, e.g. 10 to switch on a hallway light before anyone triggers its motion sensor. Use a motion/occupancy sensor as target and a short horizon."
                         }
                     }
                 }
@@ -27,7 +29,7 @@
         "error": {
             "unknown": "Unknown error occurred.",
             "target_entity_not_found": "Target entity does not exist in your Home Assistant instance.",
-            "target_entity_wrong_domain": "Target entity must be a light, switch, or input_boolean.",
+            "target_entity_wrong_domain": "Target entity must be a light, switch, input_boolean, or binary_sensor.",
             "feature_entity_not_found": "One or more feature entities do not exist in your Home Assistant instance."
         },
         "abort": {
@@ -37,9 +39,10 @@
     "options": {
         "step": {
             "init": {
-                "description": "Update feature entities for prediction. Note: Changing feature entities will reset your training data.",
+                "description": "Update feature entities and prediction horizon. Note: Changing either will reset your training data.",
                 "data": {
-                    "CONF_FEATURE_ENTITY": "Feature Entities"
+                    "CONF_FEATURE_ENTITY": "Feature Entities",
+                    "CONF_PREDICTION_HORIZON": "Prediction horizon (seconds)"
                 }
             }
         }

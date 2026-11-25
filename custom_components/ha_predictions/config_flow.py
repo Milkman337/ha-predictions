@@ -15,6 +15,7 @@ from .const import (
     CONF_ADDITIONAL_SETTINGS,
     CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER,
     CONF_FEATURE_ENTITY,
+    CONF_PREDICTION_HORIZON,
     CONF_TARGET_ENTITY,
     DOMAIN,
     LOGGER,
@@ -23,6 +24,12 @@ from .const import (
 
 if TYPE_CHECKING:
     from types import NoneType
+
+_HORIZON_SELECTOR = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=0, max=3600, step=1, unit_of_measurement="s", mode="box"
+    )
+)
 
 
 class HAPredictionsFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
@@ -62,7 +69,12 @@ class HAPredictionsFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             # Check if target entity is of correct domain
             if not _errors:
                 target_domain = target_entity.split(".")[0]
-                if target_domain not in ["light", "switch", "input_boolean"]:
+                if target_domain not in [
+                    "light",
+                    "switch",
+                    "input_boolean",
+                    "binary_sensor",
+                ]:
                     _errors["base"] = "target_entity_wrong_domain"
 
             # Check if all feature entities exist
@@ -93,7 +105,16 @@ class HAPredictionsFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Required(CONF_TARGET_ENTITY): selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            filter=[{"domain": ["light", "switch", "input_boolean"]}]
+                            filter=[
+                                {
+                                    "domain": [
+                                        "light",
+                                        "switch",
+                                        "input_boolean",
+                                        "binary_sensor",
+                                    ]
+                                }
+                            ]
                         ),
                     ),
                     vol.Required(CONF_FEATURE_ENTITY): selector.EntitySelector(
@@ -106,6 +127,9 @@ class HAPredictionsFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
                                     CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER,
                                     default=True,
                                 ): bool,
+                                vol.Optional(
+                                    CONF_PREDICTION_HORIZON, default=0
+                                ): _HORIZON_SELECTOR,
                             }
                         ),
                         {"collapsed": True},
@@ -131,7 +155,17 @@ class HAPredictionsOptionsFlowHandler(config_entries.OptionsFlow):
             # Check if feature entities have changed
             old_features = set(self.config_entry.data.get(CONF_FEATURE_ENTITY, []))
             new_features = set(user_input.get(CONF_FEATURE_ENTITY, []))
-            features_changed = old_features != new_features
+            horizon = int(user_input.get(CONF_PREDICTION_HORIZON, 0))
+            old_horizon = int(
+                self.config_entry.options.get(
+                    CONF_PREDICTION_HORIZON,
+                    self.config_entry.data.get(CONF_ADDITIONAL_SETTINGS, {}).get(
+                        CONF_PREDICTION_HORIZON, 0
+                    ),
+                )
+            )
+            # Rows labelled with a different horizon are not comparable: reset data
+            features_changed = old_features != new_features or horizon != old_horizon
 
             # Update the config entry with new data
             self.hass.config_entries.async_update_entry(
@@ -143,6 +177,7 @@ class HAPredictionsOptionsFlowHandler(config_entries.OptionsFlow):
                 options={
                     **self.config_entry.options,
                     OPT_FEATURES_CHANGED: features_changed,
+                    CONF_PREDICTION_HORIZON: horizon,
                 },
             )
 
@@ -150,6 +185,12 @@ class HAPredictionsOptionsFlowHandler(config_entries.OptionsFlow):
 
         # Get current feature entities from config entry
         current_features = self.config_entry.data.get(CONF_FEATURE_ENTITY, [])
+        current_horizon = self.config_entry.options.get(
+            CONF_PREDICTION_HORIZON,
+            self.config_entry.data.get(CONF_ADDITIONAL_SETTINGS, {}).get(
+                CONF_PREDICTION_HORIZON, 0
+            ),
+        )
 
         return self.async_show_form(
             step_id="init",
@@ -161,6 +202,10 @@ class HAPredictionsOptionsFlowHandler(config_entries.OptionsFlow):
                     ): selector.EntitySelector(
                         selector.EntitySelectorConfig(multiple=True),
                     ),
+                    vol.Optional(
+                        CONF_PREDICTION_HORIZON,
+                        default=current_horizon,
+                    ): _HORIZON_SELECTOR,
                 }
             ),
         )

@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.recorder import get_instance
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from sqlalchemy import text
@@ -19,6 +21,7 @@ from .const import (
     CONF_ADDITIONAL_SETTINGS,
     CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER,
     CONF_FEATURE_ENTITY,
+    CONF_PREDICTION_HORIZON,
     CONF_TARGET_ENTITY,
     ENTITY_KEY_OPERATION_MODE,
     ENTITY_KEY_SAMPLING_STRATEGY,
@@ -28,6 +31,7 @@ from .const import (
     MSG_PREDICTION_MADE,
     MSG_TRAINING_DONE,
     MSG_TRAINING_SETTINGS_CHANGED,
+    OFF_STATES,
     SAMPLING_NONE,
     SAMPLING_RANDOM,
     SAMPLING_SMOTE,
@@ -67,6 +71,7 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
         self.last_trained: datetime | NoneType = None
         self.trained_dataset_size: int = 0
         self.current_prediction: tuple[str, float] | NoneType = None
+        self._pending: list[dict[str, Any]] = []
 
     async def initialize(self) -> NoneType:
         """Initialize the coordinator."""
@@ -74,9 +79,9 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
         await loop.run_in_executor(None, self.read_table)
         if self.dataset is None:
             self.logger.debug("No dataset found on disk.")
-            if self.config_entry.options.get(CONF_ADDITIONAL_SETTINGS, {}).get(
-                CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER, True
-            ):
+            if self.prediction_horizon == 0 and self.config_entry.options.get(
+                CONF_ADDITIONAL_SETTINGS, {}
+            ).get(CONF_ADDITIONAL_SETTINGS_IMPORT_FROM_RECORDER, True):
                 self.logger.debug("Importing initial dataset from recorder database.")
                 self.hass.async_create_task(
                     self._extract_initial_dataset_from_recorder()
@@ -100,6 +105,52 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
     def remove_listeners(self) -> None:
         """Remove all listeners."""
         self.entity_registry.clear()
+        for pending in self._pending:
+            pending["cancel"]()
+        self._pending.clear()
+
+    @property
+    def prediction_horizon(self) -> int:
+        """Seconds between a feature snapshot and its target label."""
+        value = self.config_entry.options.get(CONF_PREDICTION_HORIZON)
+        if value is None:
+            value = self.config_entry.data.get(CONF_ADDITIONAL_SETTINGS, {}).get(
+                CONF_PREDICTION_HORIZON, 0
+            )
+        return int(value)
+
+    def _start_snapshot(self) -> None:
+        """Snapshot the features now; the label is filled in after the horizon."""
+        target = self.config_entry.data[CONF_TARGET_ENTITY]
+        features = self._get_states_for_entities(include_target=False)
+        pending: dict[str, Any] = {
+            "features": features,
+            "seen": [self._get_state_for_entity(target)],
+        }
+
+        @callback
+        def _expired(_now: Any) -> None:
+            self._pending.remove(pending)
+            self.hass.async_create_task(self._async_finish_snapshot(pending))
+
+        pending["cancel"] = async_call_later(
+            self.hass, self.prediction_horizon, _expired
+        )
+        self._pending.append(pending)
+
+    async def _async_finish_snapshot(self, pending: dict[str, Any]) -> None:
+        """Label a snapshot with what the target did during the horizon."""
+        seen = [s for s in pending["seen"] if s is not None]
+        active = [s for s in seen if s not in OFF_STATES]
+        # Any activity inside the window counts, so short motion pulses are not missed
+        label = active[-1] if active else (seen[-1] if seen else None)
+        if label in ("unavailable", "unknown"):
+            return
+        await self.hass.async_add_executor_job(
+            self._append_row, [*pending["features"], label]
+        )
+        for entity in self.entity_registry:
+            entity.notify(MSG_DATASET_CHANGED)
 
     def set_zscores(self, *, value: bool) -> NoneType:
         """En- or disable the use of zscores for training."""
@@ -170,6 +221,13 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
         new_state = event.data["new_state"]
         old_state = event.data["old_state"]
 
+        if (
+            new_state
+            and event.data["entity_id"] == self.config_entry.data[CONF_TARGET_ENTITY]
+        ):
+            for pending in self._pending:
+                pending["seen"].append(new_state.state)
+
         # Only act if state actually changed
         if old_state and new_state and old_state.state != new_state.state:
             self.logger.info("Detecting changed states, storing current instance.")
@@ -183,12 +241,7 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
 
         Runs blocking operations in executor to avoid blocking event loop.
         """
-        # Run blocking operations in executor
-        await self.hass.async_add_executor_job(self._collect_data)
-
-        # Notify entities on main event loop
-        for entity in self.entity_registry:
-            entity.notify(MSG_DATASET_CHANGED)
+        await self._async_collect_once()
 
         # Make prediction if model is ready
         if self.model.prediction_ready and self.dataset is not None:
@@ -201,10 +254,14 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
 
         This is an async wrapper that runs blocking operations in executor.
         """
-        # Run blocking operations in executor
-        await self.hass.async_add_executor_job(self._collect_data)
+        await self._async_collect_once()
 
-        # Notify entities on main event loop
+    async def _async_collect_once(self) -> None:
+        """Collect one data point now, or schedule it when a horizon is set."""
+        if self.prediction_horizon > 0:
+            self._start_snapshot()
+            return
+        await self.hass.async_add_executor_job(self._collect_data)
         for entity in self.entity_registry:
             entity.notify(MSG_DATASET_CHANGED)
 
@@ -220,6 +277,10 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
                 "Target entity not available or not known, skipping data collection."
             )
             return
+        self._append_row(xy)
+
+    def _append_row(self, xy: list[Any]) -> None:
+        """Append one row to the dataset and persist it (blocking)."""
         if self.dataset is None:
             self._initialize_dataframe()
         if self.dataset is not None and xy[-1] not in [
