@@ -451,17 +451,12 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
                         self.model.scores[1][cls][RECALL],
                         self.model.scores[1][cls][F_SCORE],
                     )
-        elif self.operation_mode == OperationMode.PRODUCTION:
-            await self.hass.async_add_executor_job(self.model.train_final, data_numpy)
-        else:
-            self.logger.error("Unknown operation mode: %s", self.operation_mode)
-            return
+        # The prediction model is trained on all data in either mode
+        await self.hass.async_add_executor_job(self.model.train_final, data_numpy)
         self.last_trained = datetime.now(tz=UTC)
         self.trained_dataset_size = self.dataset_size
         [e.notify(MSG_TRAINING_DONE) for e in self.entity_registry]
-        if self.operation_mode == OperationMode.PRODUCTION:
-            # Update prediction after training
-            await self._async_make_prediction()
+        await self._async_make_prediction()
 
     async def _extract_initial_dataset_from_recorder(self) -> NoneType:
         """Extract initial dataset from recorder history."""
@@ -486,7 +481,9 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
             return (len(pivot_data), pd.DataFrame(pivot_data))
 
         # Extract data in executor
-        number_of_rows, array = await self.hass.async_add_executor_job(_extract)
+        number_of_rows, array = await get_instance(self.hass).async_add_executor_job(
+            _extract
+        )
 
         self.logger.info("Extracted %d rows from recorder database.", number_of_rows)
         self.dataset = array
