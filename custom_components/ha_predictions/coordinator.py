@@ -228,7 +228,7 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
                 self.logger.exception(
                     "Error adding data (%s) to dataset: %s", xy, self.dataset
                 )
-            self.logger.info(self.dataset)
+            self.store_table(self.dataset)
         self.training_ready = self.dataset_size >= MIN_DATASET_SIZE
 
     async def _async_make_prediction(self) -> None:
