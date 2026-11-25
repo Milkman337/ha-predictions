@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+)
 
 from .const import (
     CONF_FEATURE_ENTITY,
     CONF_TARGET_ENTITY,
     ENTITY_KEY_CURRENT_PREDICTION,
     ENTITY_KEY_DATASET_SIZE,
+    ENTITY_KEY_LAST_TRAINED,
     ENTITY_KEY_PERFORMANCE,
     MIN_DATASET_SIZE,
     MSG_DATASET_CHANGED,
@@ -21,6 +26,7 @@ from .const import (
 from .entity import HAPredictionEntity
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from types import NoneType
 
     from homeassistant.core import HomeAssistant
@@ -55,6 +61,15 @@ async def async_setup_entry(
                     name="Dataset size",
                     icon="mdi:database",
                     suggested_display_precision=0,
+                ),
+            ),
+            LastTrainedSensor(
+                coordinator=entry.runtime_data.coordinator,
+                entity_description=SensorEntityDescription(
+                    key=ENTITY_KEY_LAST_TRAINED,
+                    name="Last trained",
+                    icon="mdi:clock-check-outline",
+                    device_class=SensorDeviceClass.TIMESTAMP,
                 ),
             ),
             CurrentPredictionSensor(
@@ -219,3 +234,41 @@ class PredictionPerformanceSensor(HAPredictionEntity, SensorEntity):
             ret["data"] = prf
             return ret
         return {}
+
+
+class LastTrainedSensor(HAPredictionEntity, SensorEntity):
+    """Sensor showing when the model was last trained."""
+
+    def __init__(
+        self,
+        coordinator: HAPredictionUpdateCoordinator,
+        entity_description: SensorEntityDescription,
+    ) -> None:
+        """Initialize the last trained sensor."""
+        super().__init__(coordinator)
+        self.entity_description = entity_description
+        self._attr_unique_id = (
+            self.coordinator.config_entry.entry_id
+            + UNDERSCORE
+            + ENTITY_KEY_LAST_TRAINED
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the time of the last completed training."""
+        return self.coordinator.last_trained
+
+    @property
+    def extra_state_attributes(self) -> dict[str, int]:
+        """Return the dataset size used for the last training."""
+        return {"trained_dataset_size": self.coordinator.trained_dataset_size}
+
+    @property
+    def should_poll(self) -> bool:
+        """Return False as the entity pushes updates."""
+        return False
+
+    def notify(self, msg: str) -> None:
+        """Handle notifications from the coordinator."""
+        if msg == MSG_TRAINING_DONE:
+            self.schedule_update_ha_state()

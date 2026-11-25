@@ -63,6 +63,8 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
         self.model: Model = Model(self.logger)
         self.operation_mode: OperationMode = OperationMode.TRAINING
         self.training_ready: bool = False
+        self.last_trained: datetime | NoneType = None
+        self.trained_dataset_size: int = 0
         self.current_prediction: tuple[str, float] | NoneType = None
 
     async def initialize(self) -> NoneType:
@@ -387,6 +389,8 @@ class HAPredictionUpdateCoordinator(DataUpdateCoordinator):
         else:
             self.logger.error("Unknown operation mode: %s", self.operation_mode)
             return
+        self.last_trained = datetime.now(tz=UTC)
+        self.trained_dataset_size = self.dataset_size
         [e.notify(MSG_TRAINING_DONE) for e in self.entity_registry]
         if self.operation_mode == OperationMode.PRODUCTION:
             # Update prediction after training
